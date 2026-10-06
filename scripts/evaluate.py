@@ -5,7 +5,7 @@ Para repetir um texto, use um sufixo: `u4ep_2.png`.
 
 Uso:
     python scripts/evaluate.py captchas/rotulados
-    python scripts/evaluate.py captchas/rotulados --preprocess median --beams 2 4
+    python scripts/evaluate.py captchas/rotulados --preprocess none median --beams 1
 """
 import argparse
 import sys
@@ -18,8 +18,6 @@ from app.config import get_settings
 from app.ocr import PREPROCESS_MODES, CaptchaOCR, load_image
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
-BATCH = 8
-SHORT = {"none": "none", "median": "med", "median_bin": "medbin"}
 
 
 def label_of(path: Path) -> str:
@@ -46,7 +44,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("folder", type=Path)
     parser.add_argument("--preprocess", nargs="+", default=list(PREPROCESS_MODES), choices=PREPROCESS_MODES)
-    parser.add_argument("--beams", nargs="+", type=int, default=[1, 2, 4])
+    parser.add_argument("--beams", nargs="+", type=int, default=[1, 2])
+    parser.add_argument("--batch", type=int, default=8, help="imagens por chamada ao modelo")
     args = parser.parse_args()
 
     paths = sorted(p for p in args.folder.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
@@ -54,7 +53,8 @@ def main() -> None:
         sys.exit(f"Nenhuma imagem em {args.folder}")
     labels = [label_of(p) for p in paths]
     images = [load_image(p.read_bytes()) for p in paths]
-    print(f"{len(paths)} imagens rotuladas em {args.folder}\n")
+    print(f"{len(paths)} imagens rotuladas em {args.folder}")
+    print("rótulos: " + " ".join(labels) + "\n")
 
     settings = get_settings()
     ocr = CaptchaOCR(settings.model_path, device=settings.device)
@@ -65,28 +65,21 @@ def main() -> None:
             ocr.preprocess, ocr.num_beams = mode, beams
             start = time.perf_counter()
             preds = []
-            for i in range(0, len(images), BATCH):
-                preds += ocr.predict(images[i:i + BATCH])
+            for i in range(0, len(images), args.batch):
+                preds += ocr.predict(images[i:i + args.batch])
             ms = (time.perf_counter() - start) * 1000 / len(images)
             exact = sum(normalize(p) == normalize(t) for p, t in zip(preds, labels))
             errors = sum(edit_distance(normalize(p), normalize(t)) for p, t in zip(preds, labels))
             cer = errors / max(1, sum(len(normalize(t)) for t in labels))
-            results.append((mode, beams, exact, cer, ms, preds))
+            results.append((mode, beams, exact, cer))
             print(f"PREPROCESS={mode:10s} NUM_BEAMS={beams}  acertos={exact}/{len(labels)} "
                   f"({exact / len(labels):.0%})  CER={cer:.1%}  {ms:.0f} ms/img")
+            pairs = [f"{t}->{p or '(vazio)'}{'' if normalize(p) == normalize(t) else '*'}" for p, t in zip(preds, labels)]
+            print("   " + "  ".join(pairs) + "\n", flush=True)
 
-    best = max(results, key=lambda r: (r[2], -r[3], -r[4]))
-    mode, beams, exact, cer, _, preds = best
-    print(f"\nMelhor: PREPROCESS={mode} NUM_BEAMS={beams} ({exact}/{len(labels)}, CER {cer:.1%})\n")
-    print(f"{'arquivo':28s} {'esperado':12s} " + " ".join(f"{SHORT[m]}/b{b}".ljust(12) for m, b, *_ in results))
-    for idx, path in enumerate(paths):
-        cells = []
-        for *_, row_preds in results:
-            pred = row_preds[idx]
-            mark = "" if normalize(pred) == normalize(labels[idx]) else "*"
-            cells.append(f"{pred}{mark}"[:12].ljust(12))
-        print(f"{path.name[:28]:28s} {labels[idx][:12]:12s} " + " ".join(cells))
-    print("\n* = errou (comparação ignora maiúsculas e espaços)")
+    mode, beams, exact, cer = max(results, key=lambda r: (r[2], -r[3]))
+    print(f"Melhor: PREPROCESS={mode} NUM_BEAMS={beams} ({exact}/{len(labels)}, CER {cer:.1%})")
+    print("* = errou (comparação ignora maiúsculas e espaços)")
 
 
 if __name__ == "__main__":
