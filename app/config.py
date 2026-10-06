@@ -20,6 +20,7 @@ class Settings:
     model_path: str
     device: str
     num_beams: int
+    preprocess: str
     max_image_bytes: int
     api_key: str
 
@@ -33,6 +34,7 @@ def get_settings() -> Settings:
         model_path=os.getenv("MODEL_PATH") or default_model,
         device=os.getenv("DEVICE", "auto"),
         num_beams=int(os.getenv("NUM_BEAMS", "2")),
+        preprocess=os.getenv("PREPROCESS", "none"),
         max_image_bytes=int(os.getenv("MAX_IMAGE_BYTES", "2000000")),
         api_key=os.getenv("API_KEY", ""),
     )

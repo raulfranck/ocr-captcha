@@ -89,3 +89,33 @@ def test_16bit_grayscale_png_is_scaled_not_clipped():
     assert Image.open(io.BytesIO(buf.getvalue())).mode.startswith("I;16")
     out = np.asarray(load_image(buf.getvalue()))
     assert out[10, 30].max() < 10 and out[0, 0].min() == 255
+
+
+def test_preprocess_modes_keep_size_and_remove_isolated_dots():
+    from app.ocr import PREPROCESS_MODES, preprocess
+
+    arr = np.full((30, 90), 255, dtype=np.uint8)
+    arr[10:20, 20:60] = 0  # text block
+    arr[2, 2] = 0  # isolated noise dot
+    image = Image.fromarray(arr).convert("RGB")
+    for mode in PREPROCESS_MODES:
+        out = preprocess(image, mode)
+        assert out.size == image.size and out.mode == "RGB"
+    cleaned = np.asarray(preprocess(image, "median"))
+    assert cleaned[2, 2].min() == 255 and cleaned[15, 40].max() == 0
+    with pytest.raises(ValueError):
+        preprocess(image, "bogus")
+
+
+def test_evaluate_helpers():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from evaluate import edit_distance, label_of, normalize
+
+    assert label_of(Path("u4ep.png")) == "u4ep"
+    assert label_of(Path("u4ep_2.png")) == "u4ep"
+    assert label_of(Path("ab_cd.png")) == "ab_cd"
+    assert normalize(" U4 ep ") == "u4ep"
+    assert edit_distance("cma5c", "cna5e") == 2

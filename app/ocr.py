@@ -4,7 +4,7 @@ import threading
 
 import numpy as np
 import torch
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageFilter, UnidentifiedImageError
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 logger = logging.getLogger(__name__)
@@ -50,10 +50,32 @@ def load_image(data: bytes) -> Image.Image:
     return Image.alpha_composite(background, rgba).convert("RGB")
 
 
+PREPROCESS_MODES = ("none", "median", "median_bin")
+
+
+def preprocess(image: Image.Image, mode: str) -> Image.Image:
+    """Optional cleanup before the model sees the image.
+
+    none: as decoded. median: 3x3 median filter, removes salt-and-pepper dots.
+    median_bin: median, then threshold to pure black and white.
+    """
+    if mode == "none":
+        return image
+    if mode not in PREPROCESS_MODES:
+        raise ValueError(f"PREPROCESS inválido: {mode!r}. Use um de {PREPROCESS_MODES}.")
+    gray = image.convert("L").filter(ImageFilter.MedianFilter(3))
+    if mode == "median_bin":
+        gray = gray.point(lambda v: 0 if v < 140 else 255)
+    return gray.convert("RGB")
+
+
 class CaptchaOCR:
-    def __init__(self, model_path: str, device: str = "auto", num_beams: int = 2):
+    def __init__(self, model_path: str, device: str = "auto", num_beams: int = 2, preprocess: str = "none"):
+        if preprocess not in PREPROCESS_MODES:
+            raise ValueError(f"PREPROCESS inválido: {preprocess!r}. Use um de {PREPROCESS_MODES}.")
         self.device = _pick_device(device)
         self.num_beams = num_beams
+        self.preprocess = preprocess
         logger.info("Carregando modelo %s em %s", model_path, self.device)
         self.processor = TrOCRProcessor.from_pretrained(model_path)
         self.model = VisionEncoderDecoderModel.from_pretrained(model_path).to(self.device)
@@ -63,6 +85,7 @@ class CaptchaOCR:
 
     @torch.inference_mode()
     def predict(self, images: list[Image.Image]) -> list[str]:
+        images = [preprocess(image, self.preprocess) for image in images]
         pixel_values = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
         with self._lock:
             generated_ids = self.model.generate(pixel_values, num_beams=self.num_beams)

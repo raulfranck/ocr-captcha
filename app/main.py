@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
             settings.model_path,
             device=settings.device,
             num_beams=settings.num_beams,
+            preprocess=settings.preprocess,
         )
     yield
 

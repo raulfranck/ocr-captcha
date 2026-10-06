@@ -60,6 +60,7 @@ cp .env.example .env
 | `MODEL_PATH`      | `./models/ocr-captcha-v3` | Pasta local do modelo ou ID no Hugging Face                |
 | `DEVICE`          | `auto`                    | `cpu`, `cuda`, `mps` ou `auto`                             |
 | `NUM_BEAMS`       | `2`                       | Beam search; 1 é mais rápido, 2 é o valor do treino        |
+| `PREPROCESS`      | `none`                    | Limpeza antes do modelo: `none`, `median` (tira o ruído de pontos) ou `median_bin` |
 | `MAX_IMAGE_BYTES` | `2000000`                 | Tamanho máximo do upload                                   |
 | `API_KEY`         | vazio                     | Se definido, exige o header `X-API-Key` em todas as chamadas |
 
@@ -134,6 +135,20 @@ pytest
 ```
 
 Os testes usam um OCR falso, então rodam sem o modelo baixado.
+
+## Medir a precisão
+
+Coloque captchas numa pasta com o **texto certo como nome do arquivo**
+(`u4ep.png`, `cma5c.png`; para repetir um texto, `u4ep_2.png`) e rode:
+
+```bash
+python scripts/evaluate.py captchas/rotulados
+```
+
+O script testa cada combinação de `PREPROCESS` e `NUM_BEAMS` e mostra a taxa de
+acerto, o CER (erro por caractere) e o que o modelo leu em cada imagem. Coloque a
+melhor combinação no `.env`. Quanto mais imagens rotuladas, mais confiável a
+comparação: 30 ou mais já dão uma boa ideia.
 
 ## Diagnóstico
 
