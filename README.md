@@ -165,6 +165,49 @@ Qwen2-VL treinados para captcha, como o `ddanielsantos/qwen2-correios-captcha` (
 `pip install torchvision`). Cada modelo é baixado automaticamente na primeira vez: ~1,3 GB por
 TrOCR, ~4,4 GB o Qwen2-VL, menos de 1 MB o captCHAD.
 
+Também aceita o EasyOCR (`pip install easyocr`): `easyocr` usa o detector de texto e depois lê
+cada trecho; `easyocr:full` lê a imagem inteira de uma vez. Nos 13 captchas de
+`captchas/rotulados` o melhor resultado foi 3/13 (23%, CER 34%) com `easyocr` e `PREPROCESS=median`.
+
+## Treinar com o estilo dos nossos captchas
+
+### Gerar captchas sintéticos
+
+`scripts/synth_captcha.py` imita o estilo de `captchas/rotulados`: 200×68 em tons de cinza,
+4 a 6 letras minúsculas e dígitos numa fonte tipo Arial, linhas onduladas e ruído de pontos.
+O nome de cada arquivo é o texto certo, como em `evaluate.py`:
+
+```bash
+python scripts/synth_captcha.py dados/sinteticos --count 5000 --seed 1
+```
+
+### Modelo pequeno (CRNN)
+
+`scripts/train_crnn.py` treina do zero uma CRNN de ~1 milhão de parâmetros (a mesma família do
+leitor do EasyOCR) com captchas gerados na hora. Não precisa baixar nada, roda na CPU e o modelo
+final tem ~4 MB:
+
+```bash
+python scripts/train_crnn.py --val captchas/rotulados --out models/crnn.pt --epochs 36
+# somando captchas reais rotulados ao treino:
+python scripts/train_crnn.py --val captchas/validacao --real captchas/rotulados --out models/crnn.pt
+```
+
+A cada época mostra os acertos e o CER em `--val` e salva o melhor modelo em `--out`.
+Na CPU (4 núcleos) cada época de 300 passos leva ~3 min.
+
+### Fine-tuning do TrOCR
+
+`scripts/train.py` continua o treino do ocr-captcha-v3 (ou de outro TrOCR) com captchas rotulados.
+Precisa do modelo baixado (passo 2) e é bem mais pesado: na CPU, use `--freeze-encoder`.
+
+```bash
+python scripts/train.py --train dados/sinteticos captchas/rotulados --val captchas/validacao \
+  --out models/ocr-captcha-ft --freeze-encoder
+```
+
+O resultado é uma pasta que a API usa direto com `MODEL_PATH=./models/ocr-captcha-ft`.
+
 ## Diagnóstico
 
 Se a API devolver um texto sem sentido (por exemplo `.com`), rode:
