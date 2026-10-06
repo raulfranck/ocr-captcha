@@ -145,7 +145,7 @@ Coloque captchas numa pasta com o **texto certo como nome do arquivo**
 python scripts/evaluate.py captchas/rotulados
 ```
 
-O script testa cada combinação de `PREPROCESS` e `NUM_BEAMS` e mostra a taxa de
+O script testa cada combinação de `PREPROCESS` e `NUM_BEAMS` (padrão: 1 e 2) e mostra a taxa de
 acerto, o CER (erro por caractere) e o que o modelo leu em cada imagem. Coloque a
 melhor combinação no `.env`. Quanto mais imagens rotuladas, mais confiável a
 comparação: 30 ou mais já dão uma boa ideia.
