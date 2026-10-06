@@ -60,7 +60,7 @@ cp .env.example .env
 | `MODEL_PATH`      | `./models/ocr-captcha-v3` | Pasta local do modelo ou ID no Hugging Face                |
 | `DEVICE`          | `auto`                    | `cpu`, `cuda`, `mps` ou `auto`                             |
 | `NUM_BEAMS`       | `2`                       | Beam search; 1 é mais rápido, 2 é o valor do treino        |
-| `PREPROCESS`      | `none`                    | Limpeza antes do modelo: `none`, `median` (tira o ruído de pontos) ou `median_bin` |
+| `PREPROCESS`      | `none`                    | Limpeza antes do modelo: `none`, `median` (tira o ruído de pontos), `median_bin` ou `median_bold` (engrossa as letras) |
 | `MAX_IMAGE_BYTES` | `2000000`                 | Tamanho máximo do upload                                   |
 | `API_KEY`         | vazio                     | Se definido, exige o header `X-API-Key` em todas as chamadas |
 
@@ -160,8 +160,10 @@ python scripts/evaluate.py captchas/rotulados --beams 1 --models \
   anuashok/ocr-captcha-v3 AndresDev/captCHAD DunnBC22/trocr-base-printed_captcha_ocr
 ```
 
-Aceita qualquer TrOCR do Hugging Face (ou pasta local) e o `AndresDev/captCHAD`.
-Cada TrOCR baixa ~1,3 GB na primeira vez.
+Aceita qualquer TrOCR do Hugging Face (ou pasta local), o `AndresDev/captCHAD` e modelos
+Qwen2-VL treinados para captcha, como o `ddanielsantos/qwen2-correios-captcha` (precisa de
+`pip install torchvision`). Cada modelo é baixado automaticamente na primeira vez: ~1,3 GB por
+TrOCR, ~4,4 GB o Qwen2-VL, menos de 1 MB o captCHAD.
 
 ## Diagnóstico
 

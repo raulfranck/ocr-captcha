@@ -6,6 +6,8 @@ Para repetir um texto, use um sufixo: `u4ep_2.png`.
 Modelos aceitos em --models:
   - qualquer TrOCR do Hugging Face ou pasta local (ex.: anuashok/ocr-captcha-v3)
   - AndresDev/captCHAD ou um arquivo .onnx no mesmo formato (requer `pip install onnxruntime`)
+  - modelos Qwen2-VL treinados para captcha, como ddanielsantos/qwen2-correios-captcha
+    (requer `pip install torchvision`; ~4,4 GB e ~5 GB de RAM)
 
 Uso:
     python scripts/evaluate.py captchas/rotulados
@@ -85,9 +87,56 @@ class CaptchadOnnx:
         return texts
 
 
+class QwenVL:
+    """Qwen2-VL fine-tuned to answer a captcha's text, e.g. ddanielsantos/qwen2-correios-captcha."""
+
+    PROMPT = "Decodifique este captcha."  # the instruction used in that model's training data
+    FALLBACK_PROCESSOR = "Qwen/Qwen2-VL-2B-Instruct"
+    uses_beams = False
+
+    def __init__(self, spec: str, device: str):
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        self.torch = torch
+        self.device = "cuda" if device in ("auto", "cuda") and torch.cuda.is_available() else "cpu"
+        try:
+            self.processor = AutoProcessor.from_pretrained(spec)
+        except (OSError, ValueError, TypeError):
+            self.processor = AutoProcessor.from_pretrained(self.FALLBACK_PROCESSOR)
+        # bfloat16 halves the RAM on CPU (~5 GB instead of ~9 GB for 2B parameters).
+        dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
+        self.model = AutoModelForImageTextToText.from_pretrained(spec, dtype=dtype).to(self.device).eval()
+        self.preprocess = "none"
+
+    def predict(self, images):
+        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": self.PROMPT}]}]
+        prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        texts = []
+        for image in images:
+            image = preprocess(image, self.preprocess).convert("RGB")
+            inputs = self.processor(text=[prompt], images=[image], return_tensors="pt").to(self.device)
+            with self.torch.inference_mode():
+                out = self.model.generate(**inputs, max_new_tokens=12, do_sample=False)
+            answer = out[:, inputs["input_ids"].shape[1]:]
+            texts.append(self.processor.batch_decode(answer, skip_special_tokens=True)[0].strip())
+        return texts
+
+
+def _model_type(spec: str) -> str:
+    from transformers import AutoConfig
+
+    try:
+        return AutoConfig.from_pretrained(spec).model_type
+    except (OSError, ValueError):
+        return ""
+
+
 def load_backend(spec: str, device: str):
     if spec.endswith(".onnx") or spec == CAPTCHAD_REPO:
         return CaptchadOnnx(spec)
+    if _model_type(spec).startswith("qwen2"):
+        return QwenVL(spec, device)
     backend = CaptchaOCR(spec, device=device)
     backend.uses_beams = True
     return backend

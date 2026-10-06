@@ -50,7 +50,7 @@ def load_image(data: bytes) -> Image.Image:
     return Image.alpha_composite(background, rgba).convert("RGB")
 
 
-PREPROCESS_MODES = ("none", "median", "median_bin")
+PREPROCESS_MODES = ("none", "median", "median_bin", "median_bold")
 BASE_PROCESSOR = "microsoft/trocr-base-printed"
 
 
@@ -59,6 +59,7 @@ def preprocess(image: Image.Image, mode: str) -> Image.Image:
 
     none: as decoded. median: 3x3 median filter, removes salt-and-pepper dots.
     median_bin: median, then threshold to pure black and white.
+    median_bold: median, then thicken the strokes (3x3 min filter), closer to bold fonts.
     """
     if mode == "none":
         return image
@@ -67,6 +68,8 @@ def preprocess(image: Image.Image, mode: str) -> Image.Image:
     gray = image.convert("L").filter(ImageFilter.MedianFilter(3))
     if mode == "median_bin":
         gray = gray.point(lambda v: 0 if v < 140 else 255)
+    elif mode == "median_bold":
+        gray = gray.filter(ImageFilter.MinFilter(3))
     return gray.convert("RGB")
 
 
