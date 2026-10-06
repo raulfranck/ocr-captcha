@@ -104,6 +104,16 @@ def generate(text: str, rng: random.Random, font_path: str | None = None,
             line_y = rng.choice(free)
         _wave(draw, width, line_y, rng)
 
+    # Short straight strokes scattered around, as in the real captchas.
+    for _ in range(rng.choices((0, 1, 2), weights=(5, 4, 1))[0]):
+        sx, sy = rng.uniform(0, width), rng.uniform(0, height)
+        angle, length = rng.uniform(0, math.pi), rng.uniform(8, 25)
+        end = (sx + length * math.cos(angle), sy + length * math.sin(angle))
+        draw.line([(sx, sy), end], fill=rng.randint(0, 40), width=2)
+    # Every real captcha carries a thin vertical tick at x=50 near the bottom.
+    tick_top = rng.randint(height - 19, height - 10)
+    draw.line([(50, tick_top), (50, min(height - 1, tick_top + rng.randint(8, 12)))], fill=rng.randint(0, 60))
+
     pixels = image.load()
     density = rng.uniform(0.04, 0.10)
     for _ in range(int(width * height * density)):
@@ -130,7 +140,7 @@ def main() -> None:
         text = "".join(rng.choice(ALPHABET) for _ in range(rng.randint(args.min_len, args.max_len)))
         seen[text] = seen.get(text, 0) + 1
         name = text if seen[text] == 1 else f"{text}_{seen[text]}"
-        generate(text, rng, args.font).save(args.out_dir / f"{name}.png")
+        generate(text, rng, args.font, height=rng.choice((68, 70))).save(args.out_dir / f"{name}.png")
     print(f"{args.count} captchas em {args.out_dir}")
 
 

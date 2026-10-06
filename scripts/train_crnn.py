@@ -77,7 +77,7 @@ class SynthStream(torch.utils.data.IterableDataset):
                 yield rng.choice(self.real)
                 continue
             text = "".join(rng.choice(ALPHABET) for _ in range(rng.randint(4, 6)))
-            yield to_tensor(generate(text, rng)), text
+            yield to_tensor(generate(text, rng, height=rng.choice((68, 70)))), text
 
 
 def collate(batch):
