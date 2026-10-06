@@ -150,6 +150,19 @@ acerto, o CER (erro por caractere) e o que o modelo leu em cada imagem. Coloque 
 melhor combinação no `.env`. Quanto mais imagens rotuladas, mais confiável a
 comparação: 30 ou mais já dão uma boa ideia.
 
+### Comparar outros modelos
+
+`--models` testa vários modelos de uma vez nos mesmos captchas e mostra um resumo no fim:
+
+```bash
+pip install onnxruntime   # só para o captCHAD
+python scripts/evaluate.py captchas/rotulados --beams 1 --models \
+  anuashok/ocr-captcha-v3 AndresDev/captCHAD DunnBC22/trocr-base-printed_captcha_ocr
+```
+
+Aceita qualquer TrOCR do Hugging Face (ou pasta local) e o `AndresDev/captCHAD`.
+Cada TrOCR baixa ~1,3 GB na primeira vez.
+
 ## Diagnóstico
 
 Se a API devolver um texto sem sentido (por exemplo `.com`), rode:

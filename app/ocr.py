@@ -51,6 +51,7 @@ def load_image(data: bytes) -> Image.Image:
 
 
 PREPROCESS_MODES = ("none", "median", "median_bin")
+BASE_PROCESSOR = "microsoft/trocr-base-printed"
 
 
 def preprocess(image: Image.Image, mode: str) -> Image.Image:
@@ -77,7 +78,12 @@ class CaptchaOCR:
         self.num_beams = num_beams
         self.preprocess = preprocess
         logger.info("Carregando modelo %s em %s", model_path, self.device)
-        self.processor = TrOCRProcessor.from_pretrained(model_path)
+        try:
+            self.processor = TrOCRProcessor.from_pretrained(model_path)
+        except (OSError, ValueError, TypeError):
+            # Some TrOCR fine-tunes ship only the weights; their tokenizer is the base model's.
+            logger.info("%s não traz o processor; usando o de %s", model_path, BASE_PROCESSOR)
+            self.processor = TrOCRProcessor.from_pretrained(BASE_PROCESSOR)
         self.model = VisionEncoderDecoderModel.from_pretrained(model_path).to(self.device)
         self.model.eval()
         # One generation at a time: parallel generate calls only fight for the same cores/GPU.
