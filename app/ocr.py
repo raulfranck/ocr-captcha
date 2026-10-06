@@ -80,17 +80,29 @@ class CRNN(nn.Module):
         return self.head(out).log_softmax(-1).permute(1, 0, 2)
 
 
-def decode(log_probs: torch.Tensor, alphabet: str = ALPHABET) -> list[str]:
-    """Greedy CTC decoding: collapse repeats, drop blanks (index 0)."""
-    texts = []
-    for seq in log_probs.argmax(-1).permute(1, 0).tolist():
-        chars, prev = [], 0
-        for t in seq:
-            if t != prev and t != 0:
+def decode_with_confidence(log_probs: torch.Tensor, alphabet: str = ALPHABET) -> list[tuple[str, float]]:
+    """Greedy CTC decoding: collapse repeats, drop blanks (index 0).
+
+    The confidence is the probability of the least certain character, so one
+    doubtful letter is enough to flag the whole reading.
+    """
+    best, ids = log_probs.exp().max(-1)
+    results = []
+    for seq, probs in zip(ids.permute(1, 0).tolist(), best.permute(1, 0).tolist()):
+        chars, char_probs, prev = [], [], 0
+        for t, p in zip(seq, probs):
+            if t != 0 and t != prev:
                 chars.append(alphabet[t - 1])
+                char_probs.append(p)
+            elif t != 0:  # same character continuing over several frames: keep its best frame
+                char_probs[-1] = max(char_probs[-1], p)
             prev = t
-        texts.append("".join(chars))
-    return texts
+        results.append(("".join(chars), min(char_probs, default=0.0)))
+    return results
+
+
+def decode(log_probs: torch.Tensor, alphabet: str = ALPHABET) -> list[str]:
+    return [text for text, _ in decode_with_confidence(log_probs, alphabet)]
 
 
 def save_model(model: CRNN, path) -> None:
@@ -110,8 +122,11 @@ class CaptchaOCR:
         self._lock = threading.Lock()
 
     @torch.inference_mode()
-    def predict(self, images: list[Image.Image]) -> list[str]:
+    def predict_with_confidence(self, images: list[Image.Image]) -> list[tuple[str, float]]:
         batch = torch.stack([to_tensor(image) for image in images]).to(self.device)
         with self._lock:
             log_probs = self.model(batch)
-        return decode(log_probs.cpu(), self.alphabet)
+        return decode_with_confidence(log_probs.cpu(), self.alphabet)
+
+    def predict(self, images: list[Image.Image]) -> list[str]:
+        return [text for text, _ in self.predict_with_confidence(images)]

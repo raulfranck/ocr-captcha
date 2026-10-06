@@ -129,6 +129,19 @@ os dois últimos instalados por `requirements-dev.txt`):
 python scripts/evaluate.py captchas/rotulados --models models/crnn.pt easyocr ddddocr
 ```
 
+## Rotular captchas novos
+
+Coloque as imagens em `captchas/revisar/` e rode:
+
+```bash
+python scripts/prelabel.py captchas/revisar
+```
+
+Cada imagem é renomeada para o texto que o modelo leu, e `captchas/conferir.png` mostra as
+leituras das menos confiáveis para as mais confiáveis. Corrija o nome dos arquivos errados
+e mova-os para `captchas/rotulados/`. Rodar de novo não mexe nos arquivos que já têm nome de
+rótulo.
+
 ## Treinar
 
 ### Captchas sintéticos

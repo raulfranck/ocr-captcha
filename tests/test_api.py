@@ -114,3 +114,13 @@ def test_evaluate_helpers():
     assert label_of(Path("ab_cd.png")) == "ab_cd"
     assert normalize(" U4 ep ") == "u4ep"
     assert edit_distance("cma5c", "cna5e") == 2
+
+
+def test_prelabel_only_touches_unlabeled_names():
+    from pathlib import Path
+
+    from scripts.prelabel import is_label
+
+    assert is_label(Path("m9v3e.png")) and is_label(Path("m9v3e_2.png"))
+    assert not is_label(Path("form_nfce_20261006_194138_0001.png"))
+    assert not is_label(Path("Captcha.png"))

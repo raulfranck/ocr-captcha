@@ -7,3 +7,4 @@ debug_*.png
 # Só o modelo oficial vai para o git; checkpoints de treino ficam locais.
 models/*
 !models/crnn.pt
+captchas/conferir.png
