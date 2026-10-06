@@ -8,6 +8,7 @@ Modelos aceitos em --models:
   - AndresDev/captCHAD ou um arquivo .onnx no mesmo formato (requer `pip install onnxruntime`)
   - modelos Qwen2-VL treinados para captcha, como ddanielsantos/qwen2-correios-captcha
     (requer `pip install torchvision`; ~4,4 GB e ~5 GB de RAM)
+  - easyocr (detector + leitura) ou easyocr:full (lê a imagem inteira), requer `pip install easyocr`
 
 Uso:
     python scripts/evaluate.py captchas/rotulados
@@ -123,6 +124,45 @@ class QwenVL:
         return texts
 
 
+class EasyOCRReader:
+    """EasyOCR's English model, limited to lowercase letters and digits.
+
+    `easyocr` runs its text detector first and joins the boxes left to right;
+    `easyocr:full` skips the detector and reads the whole image as one line.
+    Pass a custom model name after the colon (`easyocr:full:meu_modelo`) to use
+    a recognizer trained with EasyOCR's trainer and saved in ~/.EasyOCR/.
+    """
+
+    ALLOWLIST = "abcdefghijklmnopqrstuvwxyz0123456789"
+    uses_beams = False
+
+    def __init__(self, spec: str, device: str):
+        try:
+            import easyocr
+        except ImportError:
+            raise SystemExit("EasyOCR não está instalado: pip install easyocr")
+        _, *options = spec.split(":")
+        self.full = bool(options) and options[0] == "full"
+        network = options[1] if len(options) > 1 else "standard"
+        gpu = device in ("auto", "cuda") and __import__("torch").cuda.is_available()
+        self.reader = easyocr.Reader(["en"], gpu=gpu, recog_network=network, verbose=False)
+        self.preprocess = "none"
+
+    def predict(self, images):
+        texts = []
+        for image in images:
+            arr = np.asarray(preprocess(image, self.preprocess).convert("L"))
+            if self.full:
+                h, w = arr.shape
+                found = self.reader.recognize(arr, horizontal_list=[[0, w, 0, h]], free_list=[],
+                                              allowlist=self.ALLOWLIST, detail=1)
+            else:
+                found = self.reader.readtext(arr, allowlist=self.ALLOWLIST, detail=1)
+            found = sorted(found, key=lambda item: min(x for x, _ in item[0]))
+            texts.append("".join(text for _, text, _ in found))
+        return texts
+
+
 def _model_type(spec: str) -> str:
     from transformers import AutoConfig
 
@@ -133,6 +173,8 @@ def _model_type(spec: str) -> str:
 
 
 def load_backend(spec: str, device: str):
+    if spec == "easyocr" or spec.startswith("easyocr:"):
+        return EasyOCRReader(spec, device)
     if spec.endswith(".onnx") or spec == CAPTCHAD_REPO:
         return CaptchadOnnx(spec)
     if _model_type(spec).startswith("qwen2"):
