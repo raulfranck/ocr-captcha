@@ -55,7 +55,7 @@ def _wave(draw: ImageDraw.ImageDraw, width: int, y: float, rng: random.Random) -
     x0 = rng.uniform(-20, width * 0.4)
     x1 = rng.uniform(x0 + 100, width + 40)
     amp = rng.uniform(3, 9)
-    period = rng.uniform(35, 80)
+    period = rng.uniform(50, 110)
     phase = rng.uniform(0, 2 * math.pi)
     slope = rng.uniform(-0.15, 0.15)
     thickness = rng.choice((2, 2, 3))
@@ -74,15 +74,20 @@ def generate(text: str, rng: random.Random, font_path: str | None = None,
              width: int = 200, height: int = 68) -> Image.Image:
     image = Image.new("L", (width, height), 251)
     font = find_font(rng.randint(32, 38), font_path)
-    glyphs = [_glyph(c, font, rng.uniform(-15, 15)) for c in text]
-    spacing = rng.randint(-2, 1)
+    glyphs = [_glyph(c, font, rng.uniform(-18, 18)) for c in text]
+    # Letters touch and overlap in the real captchas.
+    spacing = rng.randint(-4, 0)
     total = sum(g.width for g in glyphs) + spacing * (len(glyphs) - 1)
-    x = rng.randint(0, max(0, width - total))
+    # The text sometimes runs a few pixels past the edge.
+    x = rng.randint(-4, max(-4, width - total + 4))
     line_box = glyphs[0].height
     y = rng.randint(-8, max(-8, height - line_box + 4))
+    # Baseline follows a gentle curve, so each letter sits a little higher or lower.
+    bend, bend_phase, bend_period = rng.uniform(0, 4), rng.uniform(0, 2 * math.pi), rng.uniform(2, 6)
     mask = Image.new("L", (width, height), 0)
-    for g in glyphs:
-        mask.paste(g, (x, y + rng.randint(-3, 3)), g)
+    for i, g in enumerate(glyphs):
+        dy = bend * math.sin(2 * math.pi * i / bend_period + bend_phase) + rng.randint(-1, 1)
+        mask.paste(g, (x, y + round(dy)), g)
         x += g.width + spacing
     image.paste(rng.randint(0, 20), (0, 0), mask)
 

@@ -107,6 +107,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--val", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--init", type=Path, help="continua de um modelo salvo por este script")
     parser.add_argument("--real", type=Path, help="captchas reais rotulados para somar ao treino")
     parser.add_argument("--real-ratio", type=float, default=0.2, help="fração de cada lote vinda de --real")
     parser.add_argument("--epochs", type=int, default=20)
@@ -121,6 +122,8 @@ def main() -> None:
     val = labeled(args.val)
     real = labeled(args.real) if args.real else []
     model = CRNN()
+    if args.init:
+        model.load_state_dict(torch.load(args.init, map_location="cpu")["state_dict"])
     print(f"{sum(p.numel() for p in model.parameters()) / 1e6:.2f} M parâmetros, {len(val)} imagens de validação, "
           f"{len(real)} reais no treino")
     loader = torch.utils.data.DataLoader(SynthStream(args.seed, real, args.real_ratio), batch_size=args.batch,
