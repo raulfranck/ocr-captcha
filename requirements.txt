@@ -2,6 +2,5 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 pillow>=10.0
+numpy>=1.24
 torch>=2.1
-transformers>=4.40
-huggingface_hub>=0.23

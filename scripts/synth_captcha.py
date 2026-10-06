@@ -10,11 +10,15 @@ dots and a 16-level palette. File names follow the evaluate.py convention
 import argparse
 import math
 import random
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.ocr import ALPHABET  # noqa: E402
+
 FONT_CANDIDATES = [
     "arial.ttf",
     "Arial.ttf",

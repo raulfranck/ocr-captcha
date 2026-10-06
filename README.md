@@ -1,14 +1,16 @@
 # OCR Captcha API
 
-API HTTP que recebe a imagem de um captcha e devolve o texto, usando o modelo
-[`anuashok/ocr-captcha-v3`](https://huggingface.co/anuashok/ocr-captcha-v3)
-(TrOCR ajustado a partir de `microsoft/trocr-base-printed`, ~1,3 GB, CER ≈ 1,4%).
+API HTTP que recebe a imagem de um captcha e devolve o texto. Usa uma CRNN pequena
+(rede convolucional + LSTM, ~1 milhão de parâmetros, ~4 MB) treinada neste repositório
+para o estilo dos captchas de `captchas/rotulados`: 200×68 em tons de cinza, 4 a 6 letras
+minúsculas e dígitos, linhas onduladas e ruído de pontos.
+
+O modelo treinado fica em `models/crnn.pt` e já vem no repositório.
 
 ## Requisitos
 
 - Python 3.10 ou superior
-- ~3 GB livres (modelo + PyTorch)
-- GPU é opcional: na CPU cada captcha leva por volta de 0,2 a 1 s.
+- Roda bem na CPU: cada captcha leva poucos milissegundos.
 
 ## 1. Instalar
 
@@ -27,50 +29,25 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 ```
 
-## 2. Baixar o modelo
-
-```bash
-python scripts/download_model.py
-```
-
-Os arquivos ficam em `models/ocr-captcha-v3/`. A partir daí a API funciona offline.
-
-Se aparecer `429 Too Many Requests`, o Hugging Face está limitando o acesso anônimo.
-O script espera e tenta de novo sozinho, e numa nova execução pula o que já baixou.
-Para um limite bem maior, crie um token de leitura (grátis) em
-<https://huggingface.co/settings/tokens> e rode:
-
-```bash
-# Git Bash / Linux / macOS
-HF_TOKEN=hf_xxx python scripts/download_model.py
-# PowerShell
-$env:HF_TOKEN="hf_xxx"; python scripts/download_model.py
-```
-Se você pular este passo, o modelo é baixado automaticamente para o cache do
-Hugging Face na primeira vez que a API subir.
-
-## 3. Configurar (opcional)
+## 2. Configurar (opcional)
 
 ```bash
 cp .env.example .env
 ```
 
-| Variável          | Padrão                    | O que faz                                                  |
-|-------------------|---------------------------|------------------------------------------------------------|
-| `MODEL_PATH`      | `./models/ocr-captcha-v3` | Pasta local do modelo ou ID no Hugging Face                |
-| `DEVICE`          | `auto`                    | `cpu`, `cuda`, `mps` ou `auto`                             |
-| `NUM_BEAMS`       | `2`                       | Beam search; 1 é mais rápido, 2 é o valor do treino        |
-| `PREPROCESS`      | `none`                    | Limpeza antes do modelo: `none`, `median` (tira o ruído de pontos), `median_bin` ou `median_bold` (engrossa as letras) |
-| `MAX_IMAGE_BYTES` | `2000000`                 | Tamanho máximo do upload                                   |
-| `API_KEY`         | vazio                     | Se definido, exige o header `X-API-Key` em todas as chamadas |
+| Variável          | Padrão              | O que faz                                                    |
+|-------------------|---------------------|--------------------------------------------------------------|
+| `MODEL_PATH`      | `./models/crnn.pt`  | Modelo treinado por `scripts/train_crnn.py`                  |
+| `DEVICE`          | `auto`              | `cpu`, `cuda`, `mps` ou `auto`                               |
+| `MAX_IMAGE_BYTES` | `2000000`           | Tamanho máximo do upload                                     |
+| `API_KEY`         | vazio               | Se definido, exige o header `X-API-Key` em todas as chamadas |
 
-## 4. Rodar
+## 3. Rodar
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Use **um worker só** (o padrão): cada worker carrega uma cópia do modelo na memória.
 A documentação interativa fica em <http://localhost:8000/docs>.
 
 ## Endpoints
@@ -79,7 +56,7 @@ A documentação interativa fica em <http://localhost:8000/docs>.
 
 ```bash
 curl -F "file=@captcha.png" http://localhost:8000/ocr
-# {"text":"X7kP2","elapsed_ms":312.4}
+# {"text":"x7kp2","elapsed_ms":4.1}
 ```
 
 ### `POST /ocr/base64` — JSON
@@ -96,7 +73,7 @@ curl -H "Content-Type: application/json" \
 
 ```bash
 curl -F "files=@a.png" -F "files=@b.png" http://localhost:8000/ocr/batch
-# {"texts":["X7kP2","9fGh3"],"elapsed_ms":540.1}
+# {"texts":["x7kp2","9fgh3"],"elapsed_ms":7.9}
 ```
 
 ### `GET /health`
@@ -121,10 +98,11 @@ print(r.json()["text"])
 
 ## Docker
 
+O modelo vai dentro da imagem:
+
 ```bash
-python scripts/download_model.py          # baixa o modelo uma vez no host
 docker build -t ocr-captcha .
-docker run -p 8000:8000 -v "$(pwd)/models:/app/models" ocr-captcha
+docker run -p 8000:8000 ocr-captcha
 ```
 
 ## Testes
@@ -133,8 +111,6 @@ docker run -p 8000:8000 -v "$(pwd)/models:/app/models" ocr-captcha
 pip install -r requirements-dev.txt
 pytest
 ```
-
-Os testes usam um OCR falso, então rodam sem o modelo baixado.
 
 ## Medir a precisão
 
@@ -145,85 +121,47 @@ Coloque captchas numa pasta com o **texto certo como nome do arquivo**
 python scripts/evaluate.py captchas/rotulados
 ```
 
-O script testa cada combinação de `PREPROCESS` e `NUM_BEAMS` (padrão: 1 e 2) e mostra a taxa de
-acerto, o CER (erro por caractere) e o que o modelo leu em cada imagem. Coloque a
-melhor combinação no `.env`. Quanto mais imagens rotuladas, mais confiável a
-comparação: 30 ou mais já dão uma boa ideia.
-
-### Comparar outros modelos
-
-`--models` testa vários modelos de uma vez nos mesmos captchas e mostra um resumo no fim:
+Mostra a taxa de acerto, o CER (erro por caractere) e o que o modelo leu em cada imagem.
+`--models` compara vários de uma vez (outro `.pt`, `easyocr`, `easyocr:full` ou `ddddocr`,
+os dois últimos instalados por `requirements-dev.txt`):
 
 ```bash
-pip install onnxruntime   # só para o captCHAD
-python scripts/evaluate.py captchas/rotulados --beams 1 --models \
-  anuashok/ocr-captcha-v3 AndresDev/captCHAD DunnBC22/trocr-base-printed_captcha_ocr
+python scripts/evaluate.py captchas/rotulados --models models/crnn.pt easyocr ddddocr
 ```
 
-Aceita qualquer TrOCR do Hugging Face (ou pasta local), o `AndresDev/captCHAD` e modelos
-Qwen2-VL treinados para captcha, como o `ddanielsantos/qwen2-correios-captcha` (precisa de
-`pip install torchvision`). Cada modelo é baixado automaticamente na primeira vez: ~1,3 GB por
-TrOCR, ~4,4 GB o Qwen2-VL, menos de 1 MB o captCHAD.
+## Treinar
 
-Também aceita o EasyOCR (`pip install easyocr`): `easyocr` usa o detector de texto e depois lê
-cada trecho; `easyocr:full` lê a imagem inteira de uma vez. Nos 13 captchas de
-`captchas/rotulados` o melhor resultado foi 3/13 (23%, CER 34%) com `easyocr` e `PREPROCESS=median`.
+### Captchas sintéticos
 
-## Treinar com o estilo dos nossos captchas
-
-### Gerar captchas sintéticos
-
-`scripts/synth_captcha.py` imita o estilo de `captchas/rotulados`: 200×68 em tons de cinza,
-4 a 6 letras minúsculas e dígitos numa fonte tipo Arial, linhas onduladas e ruído de pontos.
-O nome de cada arquivo é o texto certo, como em `evaluate.py`:
+`scripts/synth_captcha.py` gera captchas no mesmo estilo dos reais, com o texto certo como
+nome do arquivo. O treino gera os seus na hora; este comando serve para ver como eles ficam:
 
 ```bash
-python scripts/synth_captcha.py dados/sinteticos --count 5000 --seed 1
+python scripts/synth_captcha.py dados/sinteticos --count 500
 ```
 
-### Modelo pequeno (CRNN)
-
-`scripts/train_crnn.py` treina do zero uma CRNN de ~1 milhão de parâmetros (a mesma família do
-leitor do EasyOCR) com captchas gerados na hora. Não precisa baixar nada, roda na CPU e o modelo
-final tem ~4 MB:
+### Continuar o treino com os captchas rotulados
 
 ```bash
-python scripts/train_crnn.py --val captchas/rotulados --out models/crnn.pt --epochs 36
-# somando captchas reais rotulados ao treino:
-python scripts/train_crnn.py --val captchas/validacao --real captchas/rotulados --out models/crnn.pt
+python scripts/train_crnn.py --real captchas/rotulados --holdout 10 \
+  --init models/crnn.pt --out models/crnn-novo.pt
 ```
 
-A cada época mostra os acertos e o CER em `--val` e salva o melhor modelo em `--out`.
-Na CPU (4 núcleos) cada época de 300 passos leva ~3 min.
+- `--real` mistura os captchas reais com os sintéticos (30% de cada lote, com pequenas
+  variações de posição, rotação e ruído).
+- `--holdout 10` separa 10 deles para medir cada época; ficam fora do treino e são sempre os
+  mesmos, então os números de rodadas diferentes são comparáveis.
+- A cada época mostra os acertos e o CER na validação e salva o melhor modelo em `--out`.
+  Se ele for melhor que o atual, copie-o para `models/crnn.pt`.
+- Na CPU (4 núcleos) cada época leva ~3 min. Sem `--init`, treina do zero: use
+  `--lr 1e-3 --epochs 30`, porque as primeiras ~6 épocas são só de aquecimento.
 
-### Fine-tuning do TrOCR
-
-`scripts/train.py` continua o treino do ocr-captcha-v3 (ou de outro TrOCR) com captchas rotulados.
-Precisa do modelo baixado (passo 2) e é bem mais pesado: na CPU, use `--freeze-encoder`.
-
-```bash
-python scripts/train.py --train dados/sinteticos captchas/rotulados --val captchas/validacao \
-  --out models/ocr-captcha-ft --freeze-encoder
-```
-
-O resultado é uma pasta que a API usa direto com `MODEL_PATH=./models/ocr-captcha-ft`.
-
-## Diagnóstico
-
-Se a API devolver um texto sem sentido (por exemplo `.com`), rode:
-
-```bash
-python scripts/diagnose.py caminho/captcha.png
-```
-
-Ele mostra se o modelo carregou completo, o formato da imagem e o que o modelo lê,
-e salva ao lado da imagem a versão que o modelo recebe (`debug_*.png`).
+Quanto mais captchas rotulados em `captchas/rotulados`, melhor o modelo e mais confiável
+a medição.
 
 ## Observações
 
-- Imagens com transparência são achatadas sobre fundo branco antes da inferência,
-  como no exemplo do model card. PNGs em tons de cinza de 16 bits são convertidos
-  para 8 bits antes disso.
-- O modelo foi treinado num estilo específico de captcha (veja as imagens no model
-  card). Em captchas muito diferentes a precisão cai; nesse caso o caminho é fazer
-  fine-tuning com exemplos rotulados do seu captcha.
+- Imagens com transparência são achatadas sobre fundo branco antes da inferência. PNGs em
+  tons de cinza de 16 bits são convertidos para 8 bits antes disso.
+- O modelo só conhece letras minúsculas e dígitos, no estilo de `captchas/rotulados`.
+  Em captchas de outro estilo ele erra; nesse caso é preciso treinar com exemplos deles.

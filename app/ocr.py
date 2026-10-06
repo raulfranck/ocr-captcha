@@ -4,10 +4,13 @@ import threading
 
 import numpy as np
 import torch
-from PIL import Image, ImageFilter, UnidentifiedImageError
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+from PIL import Image, UnidentifiedImageError
+from torch import nn
 
 logger = logging.getLogger(__name__)
+
+ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+HEIGHT, WIDTH = 64, 192
 
 
 class InvalidImageError(ValueError):
@@ -39,7 +42,7 @@ def _to_8bit(image: Image.Image) -> Image.Image:
 
 
 def load_image(data: bytes) -> Image.Image:
-    """Decode bytes and flatten any transparency onto white, as the model card does."""
+    """Decode bytes and flatten any transparency onto white."""
     try:
         image = Image.open(io.BytesIO(data))
         image.load()
@@ -50,53 +53,65 @@ def load_image(data: bytes) -> Image.Image:
     return Image.alpha_composite(background, rgba).convert("RGB")
 
 
-PREPROCESS_MODES = ("none", "median", "median_bin", "median_bold")
-BASE_PROCESSOR = "microsoft/trocr-base-printed"
+def to_tensor(image: Image.Image) -> torch.Tensor:
+    gray = image.convert("L").resize((WIDTH, HEIGHT), Image.BILINEAR)
+    return torch.from_numpy(np.asarray(gray, dtype=np.float32) / 127.5 - 1.0)[None]
 
 
-def preprocess(image: Image.Image, mode: str) -> Image.Image:
-    """Optional cleanup before the model sees the image.
+class CRNN(nn.Module):
+    """CNN + 2-layer bidirectional LSTM + CTC head, ~1M parameters."""
 
-    none: as decoded. median: 3x3 median filter, removes salt-and-pepper dots.
-    median_bin: median, then threshold to pure black and white.
-    median_bold: median, then thicken the strokes (3x3 min filter), closer to bold fonts.
-    """
-    if mode == "none":
-        return image
-    if mode not in PREPROCESS_MODES:
-        raise ValueError(f"PREPROCESS inválido: {mode!r}. Use um de {PREPROCESS_MODES}.")
-    gray = image.convert("L").filter(ImageFilter.MedianFilter(3))
-    if mode == "median_bin":
-        gray = gray.point(lambda v: 0 if v < 140 else 255)
-    elif mode == "median_bold":
-        gray = gray.filter(ImageFilter.MinFilter(3))
-    return gray.convert("RGB")
+    def __init__(self, classes: int = len(ALPHABET) + 1):
+        super().__init__()
+
+        def block(cin, cout, pool):
+            return [nn.Conv2d(cin, cout, 3, padding=1), nn.BatchNorm2d(cout), nn.ReLU(inplace=True), nn.MaxPool2d(pool)]
+
+        self.cnn = nn.Sequential(
+            *block(1, 32, 2), *block(32, 64, 2), *block(64, 128, (2, 1)), *block(128, 128, (2, 1)),
+            nn.Conv2d(128, 128, (4, 1)), nn.BatchNorm2d(128), nn.ReLU(inplace=True),  # height 4 -> 1
+        )
+        self.rnn = nn.LSTM(128, 128, num_layers=2, bidirectional=True, batch_first=True, dropout=0.2)
+        self.head = nn.Linear(256, classes)
+
+    def forward(self, x):  # (B, 1, 64, 192) -> (T=48, B, classes) log-probs
+        features = self.cnn(x).squeeze(2).permute(0, 2, 1)
+        out, _ = self.rnn(features)
+        return self.head(out).log_softmax(-1).permute(1, 0, 2)
+
+
+def decode(log_probs: torch.Tensor, alphabet: str = ALPHABET) -> list[str]:
+    """Greedy CTC decoding: collapse repeats, drop blanks (index 0)."""
+    texts = []
+    for seq in log_probs.argmax(-1).permute(1, 0).tolist():
+        chars, prev = [], 0
+        for t in seq:
+            if t != prev and t != 0:
+                chars.append(alphabet[t - 1])
+            prev = t
+        texts.append("".join(chars))
+    return texts
+
+
+def save_model(model: CRNN, path) -> None:
+    torch.save({"state_dict": model.state_dict(), "alphabet": ALPHABET, "size": (HEIGHT, WIDTH)}, path)
 
 
 class CaptchaOCR:
-    def __init__(self, model_path: str, device: str = "auto", num_beams: int = 2, preprocess: str = "none"):
-        if preprocess not in PREPROCESS_MODES:
-            raise ValueError(f"PREPROCESS inválido: {preprocess!r}. Use um de {PREPROCESS_MODES}.")
+    def __init__(self, model_path: str, device: str = "auto"):
         self.device = _pick_device(device)
-        self.num_beams = num_beams
-        self.preprocess = preprocess
         logger.info("Carregando modelo %s em %s", model_path, self.device)
-        try:
-            self.processor = TrOCRProcessor.from_pretrained(model_path)
-        except (OSError, ValueError, TypeError):
-            # Some TrOCR fine-tunes ship only the weights; their tokenizer is the base model's.
-            logger.info("%s não traz o processor; usando o de %s", model_path, BASE_PROCESSOR)
-            self.processor = TrOCRProcessor.from_pretrained(BASE_PROCESSOR)
-        self.model = VisionEncoderDecoderModel.from_pretrained(model_path).to(self.device)
-        self.model.eval()
-        # One generation at a time: parallel generate calls only fight for the same cores/GPU.
+        checkpoint = torch.load(model_path, map_location="cpu")
+        self.alphabet = checkpoint.get("alphabet", ALPHABET)
+        self.model = CRNN(len(self.alphabet) + 1)
+        self.model.load_state_dict(checkpoint["state_dict"])
+        self.model.to(self.device).eval()
+        # One inference at a time: parallel calls only fight for the same cores/GPU.
         self._lock = threading.Lock()
 
     @torch.inference_mode()
     def predict(self, images: list[Image.Image]) -> list[str]:
-        images = [preprocess(image, self.preprocess) for image in images]
-        pixel_values = self.processor(images=images, return_tensors="pt").pixel_values.to(self.device)
+        batch = torch.stack([to_tensor(image) for image in images]).to(self.device)
         with self._lock:
-            generated_ids = self.model.generate(pixel_values, num_beams=self.num_beams)
-        texts = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
-        return [text.strip() for text in texts]
+            log_probs = self.model(batch)
+        return decode(log_probs.cpu(), self.alphabet)

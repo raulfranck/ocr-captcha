@@ -10,8 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY scripts ./scripts
+COPY models/crnn.pt ./models/crnn.pt
 
-# Mount the model downloaded on the host at /app/models (see README).
-ENV MODEL_PATH=/app/models/ocr-captcha-v3
+ENV MODEL_PATH=/app/models/crnn.pt
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

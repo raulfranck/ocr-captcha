@@ -1,6 +1,5 @@
 -r requirements.txt
 pytest>=8.0
 httpx>=0.27
-onnxruntime>=1.17  # só para comparar com o captCHAD em scripts/evaluate.py
-torchvision  # só para os modelos Qwen2-VL em scripts/evaluate.py; com torch CPU, instale do mesmo índice
-easyocr  # só para comparar com o EasyOCR em scripts/evaluate.py
+easyocr  # só para comparar em scripts/evaluate.py
+ddddocr  # só para comparar em scripts/evaluate.py

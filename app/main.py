@@ -21,12 +21,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
     if not hasattr(app.state, "ocr"):  # tests inject a fake before startup
-        app.state.ocr = CaptchaOCR(
-            settings.model_path,
-            device=settings.device,
-            num_beams=settings.num_beams,
-            preprocess=settings.preprocess,
-        )
+        app.state.ocr = CaptchaOCR(settings.model_path, device=settings.device)
     yield
 
 
